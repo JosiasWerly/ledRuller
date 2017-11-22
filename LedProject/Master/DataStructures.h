@@ -10,6 +10,8 @@
 #define dLeds ((float)180/(float)Leds)
 #define maxTime 60
 #define dTime 0.05f
+#define pi 3.141592f
+#define piRad 57.2957
 
 template<typename TKey, typename TValue>
 class pair
@@ -140,6 +142,18 @@ public:
 		}
 		pState = nState;
 		return dir;
+	}
+	template<typename T=int>
+	T getValueInRange(T &data, T Min=0, T Max=-1, T pass=1)
+	{
+		const int d = this->getDirection();
+		if (d != 0)
+		{
+			data += (d*pass);
+			data = ((data > Max) ? Max : ((data < Min) ? Min : data));
+			return 1;
+		}
+		return 0;
 	}
 };
 
@@ -276,7 +290,6 @@ public:
 	virtual procedureEvent loop() = 0;
 };
 
-
 //Just forwardDeclarationo
 class scSelectionExer;
 class scIExercise;
@@ -296,13 +309,12 @@ public:
 	void setup();
 	procedureEvent loop();
 };
-
 class scIExercise
 	: public iScreen
 {
 public:
-	int point, range;
-	float upTime, downTime;
+	int point, range; //Unsigned?
+	double upTime, downTime;
 
 	scIExercise()
 	{}
@@ -310,14 +322,13 @@ public:
 	{
 		Serial.println((char)32);
 	}
-
 	void getPointRange(String valA, String valB)
 	{
 		dis->pagePrint(valA);
 		Serial.println(point);
 		while (!dec->isPressed())
 		{
-			if (getData(point, 0, Leds - 1))
+			if (dec->getValueInRange(point, 0, Leds - 1))
 			{
 				dis->pagePrint(valA);
 				Serial.println(point + 1);
@@ -331,15 +342,16 @@ public:
 		while (dec->isPressed()) {}
 
 		bit->clear();
-		range = 20;
+		range = point;
 		dis->pagePrint(valB);
 		Serial.println(range);
 		while (!dec->isPressed())
 		{
-			if (getData(range, 0, (Leds - 1) - point))
+			if (dec->getValueInRange(range, 0, (Leds - 1) - point))
 			{				
 				dis->pagePrint(valB);
 				bit->clear();
+				bit->set(point, true);
 				bit->set(range + point, true);
 				Serial.println(range + point + 1);
 				// for(byte x=point; x<Leds; x++)
@@ -349,28 +361,6 @@ public:
 		}
 		while (dec->isPressed()) {}
 	}
-	int getData(int &data, int Min = 0, int Max = -1)
-	{
-		int d = dec->getDirection();
-		if (d != 0)
-		{
-			data += d;
-			data = ((data > Max) ? Max : ((data < Min) ? Min : data));
-			return 1;
-		}
-		return 0;
-	}
-	int getData(float &data, int Min = 0, int Max = -1, float pass=0.5f)
-	{
-		int d = dec->getDirection();
-		if (d != 0)
-		{
-			data += (d*pass);
-			data = ((data > Max) ? Max : ((data < Min) ? Min : data));
-			return 1;
-		}
-		return 0;
-	}
 	void getTime()
 	{
 		dis->pagePrint("UpTime");
@@ -378,7 +368,7 @@ public:
 		while (dec->isPressed()) {}
 		while (!dec->isPressed())
 		{
-			if (getData(upTime, 0.5f, maxTime, dTime))
+			if (dec->getValueInRange<double>(upTime, 0.5f, maxTime, dTime))
 			{
 				dis->pagePrint("UpTime");
 				Serial.println(String(upTime) + String("s"));
@@ -390,7 +380,7 @@ public:
 		Serial.println(downTime);
 		while (!dec->isPressed())
 		{
-			if (getData(downTime, 0.5f, maxTime, dTime))
+			if (dec->getValueInRange<double>(downTime, 0.5f, maxTime, dTime))
 			{
 				dis->pagePrint("DownTime");
 				Serial.println(String(downTime) + String("s"));
@@ -399,7 +389,47 @@ public:
 		while (dec->isPressed()) {}
 	}
 	virtual void setup() = 0;
-	virtual procedureEvent loop()=0;
+	virtual procedureEvent loop()
+	{
+		do
+		{
+			const unsigned char 
+				pos = point + range;
+			unsigned int 
+				accT=0, 
+				curT=0;
+			for (char i = point; i <= pos; i++)
+			{
+				accT=millis();
+				bit->clear();			
+				bit->set(point, 1);
+				bit->set(point + range, 1);
+				bit->set(i, 1);				
+				bit->updateShifterRegister();
+				if (dec->isPressed())
+					return procedureEvent(1, new scSelectionExer());
+				curT=millis();
+				delay(-((curT-accT)-upTime));
+			}
+			bit->clear();
+			bit->set(point, 1);
+			bit->set(point + range, 1);
+			for (char i = pos; i >= point; i--)
+			{
+				accT=millis();
+				bit->clear();			
+				bit->set(point, 1);
+				bit->set(point + range, 1);
+				bit->set(i, 1);				
+				bit->updateShifterRegister();
+				if (dec->isPressed())
+					return procedureEvent(1, new scSelectionExer());
+				curT=millis();
+				delay(-((curT-accT)-upTime));
+			}
+		} while (!dec->isPressed());
+		return procedureEvent(1, new scSelectionExer());
+	}
 };
 class scExerciseA
 	: public scIExercise
@@ -408,38 +438,6 @@ public:
 	scExerciseA()
 	{}
 	void setup();
-	procedureEvent loop()
-	{
-		do
-		{
-			bit->clear();
-			const unsigned char pos = point + range;
-			for (char i = point; i < pos; i++)
-			{
-				// Serial.print("->");
-				// Serial.println(i, HEX);
-				bit->clear();
-				bit->set(i, 1);
-				bit->updateShifterRegister();
-				if (dec->isPressed())
-					return procedureEvent(1, new scSelectionExer());
-				delay(upTime);
-			}
-			bit->clear();
-			for (char i = pos; i >= point; i--)
-			{
-				// Serial.print("->");
-				// Serial.println(i, HEX);
-				bit->clear();
-				bit->set(i, 1);
-				bit->updateShifterRegister();
-				if (dec->isPressed())
-					return procedureEvent(1, new scSelectionExer());
-				delay(downTime);
-			}
-		} while (!dec->isPressed());
-		return procedureEvent(1, new scSelectionExer());
-	}
 };
 class scExerciseB
 	: public scIExercise
@@ -448,40 +446,7 @@ public:
 	scExerciseB()
 	{}
 	void setup();
-	procedureEvent loop()
-	{
-		do
-		{
-			bit->clear();
-			const unsigned char pos = point + range;
-			for (char i = point; i < pos; i++)
-			{
-				// Serial.print("->");
-				// Serial.println(i, HEX);
-				bit->clear();
-				bit->set(i, 1);
-				bit->updateShifterRegister();
-				if (dec->isPressed())
-					return procedureEvent(1, new scSelectionExer());
-				delay(upTime);
-			}
-			bit->clear();
-			for (char i = pos; i >= point; i--)
-			{
-				// Serial.print("->");
-				// Serial.println(i, HEX);
-				bit->clear();
-				bit->set(i, 1);
-				bit->updateShifterRegister();
-				if (dec->isPressed())
-					return procedureEvent(1, new scSelectionExer());
-				delay(downTime);
-			}
-		} while (!dec->isPressed());
-		return procedureEvent(1, new scSelectionExer());
-	}
 };
-
 void scSelectionExer::setup()
 {
 	IdExe = 0;
@@ -517,7 +482,6 @@ procedureEvent scSelectionExer::loop()
 	}
 	return procedureEvent(0, nullptr);
 }
-
 void scExerciseA::setup()
 {
 	upTime = downTime = point = range = 0;
@@ -531,110 +495,47 @@ void scExerciseA::setup()
 	
 	dis->pagePrint(String(upTime) + String("s"));
 	Serial.println(String(downTime) + String("s"));
-
-	upTime = (upTime * 1000) /range;
-	downTime = (downTime * 1000) / range;
+	upTime = (upTime * 1000)/(range+1);	
+	downTime = (downTime * 1000) /(range+1);
 }
 void scExerciseB::setup()
 {
 	upTime = downTime = point = range = 0;
+	
 	bit->clear();
-	bit->set(0, 1);
-	bit->updateShifterRegister();
-
+	bit->updateShifterRegister();	
 	dis->pagePrint("Lenght");
 	Serial.println(String(point) + String("cm"));
-	point = 10;
 	while (!dec->isPressed())
 	{
-		if (getData(point, 0, 120))
+		if (dec->getValueInRange(point, 0, 120))
 		{
 			dis->pagePrint("Lenght");
 			Serial.println(String(point) + String("cm"));
-			bit->clear();
-			bit->set(point, true);
-			// for(byte x=0; x<Leds; x++)
-			// {bit->set(x, (x>=point ? true:false));}
-			bit->updateShifterRegister();
 		}
 	}
-	while (dec->isPressed()) {}
-	delay(50);
+	while (dec->isPressed()){} /////// Point -> LENGHT
+	
 	bit->clear();
-	range = 120;
+	bit->updateShifterRegister();	
 	dis->pagePrint("Degress");
-	Serial.println(range);
+	Serial.println(String(range) + String("º"));
 	while (!dec->isPressed())
 	{
-		if (getData(range, 0, 180))
+		if (dec->getValueInRange(range, 0, 120))
 		{
 			dis->pagePrint("Degress");
-			Serial.println(range);
-			bit->clear();
-			bit->set(range, true);
-			// for(byte x=point; x<Leds; x++)
-			// {bit->set(x, (x<=(point+range)?true:false));}
-			bit->updateShifterRegister();
+			Serial.println(String(range) + String("º"));
 		}
 	}
-	while (dec->isPressed()) {}
+	while (dec->isPressed()){} /////// range -> DEGRESS
 	getTime();
 
+	range=(range/piRad)*point;
+	point=0;
 
 	dis->pagePrint(String(upTime) + String("s"));
 	Serial.println(String(downTime) + String("s"));
-	range = (float)range/((float)180/(float)Leds);
-	point = 0;
-	Serial.print("->");
-	Serial.println(range);
-	upTime = (upTime * 1000) / range;
-	downTime = (downTime * 1000) / range;
+	upTime = (upTime * 1000)/(range+1);	
+	downTime = (downTime * 1000) /(range+1);
 }
-
-
-
-
-
-
-// int latchPin = 12;
-// int clockPin = 11;
-// int dataPin = 10;
-
-
-// #define boards 5
-// byte data[boards] = {0, 0, 0, 0, 0};
-
-
-// void setup() 
-// {
-//   pinMode(latchPin, OUTPUT);
-//   pinMode(dataPin, OUTPUT);  
-//   pinMode(clockPin, OUTPUT);
-//   Serial.begin(9600);  
-// }
- 
-// void loop() 
-// {
-//   delay(1000);  
-//   for(int x = 0; x < 5; x++)
-//   {    
-//     for (int i = 0; i < 8; i++)
-//     {
-//       int _bit = 1 << i;
-//       data[x] = _bit;
-//       Serial.print(x);    Serial.print("-");    Serial.println(data[x], BIN);
-//       updateShiftRegister();
-//       delay(500);
-//     }
-//     data[x] = 0;
-//     delay(1000);
-//   }  
-// }
-
-// void updateShiftRegister()
-// {
-//    digitalWrite(latchPin, LOW);
-//    for(int x = (boards-1); x >= 0; x--)
-//       shiftOut(dataPin, clockPin, LSBFIRST, data[x]);
-//    digitalWrite(latchPin, HIGH);
-// }
